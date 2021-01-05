@@ -24,6 +24,9 @@ test('test url', () => {
   expect(gcc.distributionUrl('9-2019-q4', 'linux')).toStrictEqual(
     'https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2019q4/gcc-arm-none-eabi-9-2019-q4-major-x86_64-linux.tar.bz2'
   )
+  expect(gcc.distributionUrl('10-2020-q4', 'linux')).toStrictEqual(
+    'https://developer.arm.com/-/media/Files/downloads/gnu-rm/10-2020q4/gcc-arm-none-eabi-10-2020-q4-major-x86_64-linux.tar.bz2'
+  )
 })
 
 test('test url response', async () => {
@@ -56,6 +59,7 @@ async function tmpInstall(release: string, platform?: string): Promise<void> {
 test(
   'install',
   async () => {
+    await tmpInstall('10-2020-q4', 'linux')
     await tmpInstall('9-2019-q4', 'darwin')
     await tmpInstall('6-2017-q1', 'win32')
   },
