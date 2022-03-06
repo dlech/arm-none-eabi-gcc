@@ -413,7 +413,7 @@ module.exports = FileReader
 
 var fs = __webpack_require__(598)
 var inherits = __webpack_require__(689)
-var Reader = __webpack_require__(806)
+var Reader = __webpack_require__(617)
 var EOF = {EOF: true}
 var CLOSE = {CLOSE: true}
 
@@ -1379,7 +1379,7 @@ module.exports = Unpack
 
 module.exports = ProxyReader
 
-var Reader = __webpack_require__(806)
+var Reader = __webpack_require__(617)
 var getType = __webpack_require__(716)
 var inherits = __webpack_require__(689)
 var fs = __webpack_require__(598)
@@ -11165,7 +11165,7 @@ function expand(str, isTop) {
 /***/ (function(__unusedmodule, exports, __webpack_require__) {
 
 exports.Abstract = __webpack_require__(394)
-exports.Reader = __webpack_require__(806)
+exports.Reader = __webpack_require__(617)
 exports.Writer = __webpack_require__(368)
 
 exports.File = {
@@ -17636,6 +17636,7 @@ const url = __importStar(__webpack_require__(835));
 const node_fetch_1 = __importDefault(__webpack_require__(454));
 const tar_1 = __importDefault(__webpack_require__(885));
 const unbzip2_stream_1 = __importDefault(__webpack_require__(849));
+const xz = __importStar(__webpack_require__(998));
 const unzipper = __importStar(__webpack_require__(360));
 const gcc = __importStar(__webpack_require__(845));
 function urlExt(s) {
@@ -17644,7 +17645,7 @@ function urlExt(s) {
     const components = (_a = u.path) === null || _a === void 0 ? void 0 : _a.split('/');
     if (components && ((_b = components) === null || _b === void 0 ? void 0 : _b.length) > 0) {
         const last = components[((_c = components) === null || _c === void 0 ? void 0 : _c.length) - 1];
-        const dot = last.indexOf('.');
+        const dot = last.indexOf('.', last.length - 8);
         if (dot >= 0) {
             return last.substr(dot).toLowerCase();
         }
@@ -17671,6 +17672,10 @@ function install(release, directory, platform) {
             case '.tar.bz2':
                 extractor = tar_1.default.x({ strip: 1, C: directory });
                 resp.body.pipe(unbzip2_stream_1.default()).pipe(extractor);
+                break;
+            case '.tar.xz':
+                extractor = tar_1.default.x({ strip: 1, C: directory });
+                resp.body.pipe(new xz.Decompressor()).pipe(extractor);
                 break;
             default:
                 throw new Error(`can't decompress ${urlExt(distUrl)}`);
@@ -18997,7 +19002,7 @@ module.exports = LinkReader
 
 var fs = __webpack_require__(598)
 var inherits = __webpack_require__(689)
-var Reader = __webpack_require__(806)
+var Reader = __webpack_require__(617)
 
 inherits(LinkReader, Reader)
 
@@ -20055,6 +20060,268 @@ try {
 /***/ (function(module) {
 
 module.exports = require("events");
+
+/***/ }),
+
+/***/ 617:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+module.exports = Reader
+
+var fs = __webpack_require__(598)
+var Stream = __webpack_require__(413).Stream
+var inherits = __webpack_require__(689)
+var path = __webpack_require__(622)
+var getType = __webpack_require__(716)
+var hardLinks = Reader.hardLinks = {}
+var Abstract = __webpack_require__(394)
+
+// Must do this *before* loading the child classes
+inherits(Reader, Abstract)
+
+var LinkReader = __webpack_require__(594)
+
+function Reader (props, currentStat) {
+  var self = this
+  if (!(self instanceof Reader)) return new Reader(props, currentStat)
+
+  if (typeof props === 'string') {
+    props = { path: props }
+  }
+
+  // polymorphism.
+  // call fstream.Reader(dir) to get a DirReader object, etc.
+  // Note that, unlike in the Writer case, ProxyReader is going
+  // to be the *normal* state of affairs, since we rarely know
+  // the type of a file prior to reading it.
+
+  var type
+  var ClassType
+
+  if (props.type && typeof props.type === 'function') {
+    type = props.type
+    ClassType = type
+  } else {
+    type = getType(props)
+    ClassType = Reader
+  }
+
+  if (currentStat && !type) {
+    type = getType(currentStat)
+    props[type] = true
+    props.type = type
+  }
+
+  switch (type) {
+    case 'Directory':
+      ClassType = __webpack_require__(984)
+      break
+
+    case 'Link':
+    // XXX hard links are just files.
+    // However, it would be good to keep track of files' dev+inode
+    // and nlink values, and create a HardLinkReader that emits
+    // a linkpath value of the original copy, so that the tar
+    // writer can preserve them.
+    // ClassType = HardLinkReader
+    // break
+
+    case 'File':
+      ClassType = __webpack_require__(58)
+      break
+
+    case 'SymbolicLink':
+      ClassType = LinkReader
+      break
+
+    case 'Socket':
+      ClassType = __webpack_require__(936)
+      break
+
+    case null:
+      ClassType = __webpack_require__(73)
+      break
+  }
+
+  if (!(self instanceof ClassType)) {
+    return new ClassType(props)
+  }
+
+  Abstract.call(self)
+
+  if (!props.path) {
+    self.error('Must provide a path', null, true)
+  }
+
+  self.readable = true
+  self.writable = false
+
+  self.type = type
+  self.props = props
+  self.depth = props.depth = props.depth || 0
+  self.parent = props.parent || null
+  self.root = props.root || (props.parent && props.parent.root) || self
+
+  self._path = self.path = path.resolve(props.path)
+  if (process.platform === 'win32') {
+    self.path = self._path = self.path.replace(/\?/g, '_')
+    if (self._path.length >= 260) {
+      // how DOES one create files on the moon?
+      // if the path has spaces in it, then UNC will fail.
+      self._swallowErrors = true
+      // if (self._path.indexOf(" ") === -1) {
+      self._path = '\\\\?\\' + self.path.replace(/\//g, '\\')
+    // }
+    }
+  }
+  self.basename = props.basename = path.basename(self.path)
+  self.dirname = props.dirname = path.dirname(self.path)
+
+  // these have served their purpose, and are now just noisy clutter
+  props.parent = props.root = null
+
+  // console.error("\n\n\n%s setting size to", props.path, props.size)
+  self.size = props.size
+  self.filter = typeof props.filter === 'function' ? props.filter : null
+  if (props.sort === 'alpha') props.sort = alphasort
+
+  // start the ball rolling.
+  // this will stat the thing, and then call self._read()
+  // to start reading whatever it is.
+  // console.error("calling stat", props.path, currentStat)
+  self._stat(currentStat)
+}
+
+function alphasort (a, b) {
+  return a === b ? 0
+    : a.toLowerCase() > b.toLowerCase() ? 1
+      : a.toLowerCase() < b.toLowerCase() ? -1
+        : a > b ? 1
+          : -1
+}
+
+Reader.prototype._stat = function (currentStat) {
+  var self = this
+  var props = self.props
+  var stat = props.follow ? 'stat' : 'lstat'
+  // console.error("Reader._stat", self._path, currentStat)
+  if (currentStat) process.nextTick(statCb.bind(null, null, currentStat))
+  else fs[stat](self._path, statCb)
+
+  function statCb (er, props_) {
+    // console.error("Reader._stat, statCb", self._path, props_, props_.nlink)
+    if (er) return self.error(er)
+
+    Object.keys(props_).forEach(function (k) {
+      props[k] = props_[k]
+    })
+
+    // if it's not the expected size, then abort here.
+    if (undefined !== self.size && props.size !== self.size) {
+      return self.error('incorrect size')
+    }
+    self.size = props.size
+
+    var type = getType(props)
+    var handleHardlinks = props.hardlinks !== false
+
+    // special little thing for handling hardlinks.
+    if (handleHardlinks && type !== 'Directory' && props.nlink && props.nlink > 1) {
+      var k = props.dev + ':' + props.ino
+      // console.error("Reader has nlink", self._path, k)
+      if (hardLinks[k] === self._path || !hardLinks[k]) {
+        hardLinks[k] = self._path
+      } else {
+        // switch into hardlink mode.
+        type = self.type = self.props.type = 'Link'
+        self.Link = self.props.Link = true
+        self.linkpath = self.props.linkpath = hardLinks[k]
+        // console.error("Hardlink detected, switching mode", self._path, self.linkpath)
+        // Setting __proto__ would arguably be the "correct"
+        // approach here, but that just seems too wrong.
+        self._stat = self._read = LinkReader.prototype._read
+      }
+    }
+
+    if (self.type && self.type !== type) {
+      self.error('Unexpected type: ' + type)
+    }
+
+    // if the filter doesn't pass, then just skip over this one.
+    // still have to emit end so that dir-walking can move on.
+    if (self.filter) {
+      var who = self._proxy || self
+      // special handling for ProxyReaders
+      if (!self.filter.call(who, who, props)) {
+        if (!self._disowned) {
+          self.abort()
+          self.emit('end')
+          self.emit('close')
+        }
+        return
+      }
+    }
+
+    // last chance to abort or disown before the flow starts!
+    var events = ['_stat', 'stat', 'ready']
+    var e = 0
+    ;(function go () {
+      if (self._aborted) {
+        self.emit('end')
+        self.emit('close')
+        return
+      }
+
+      if (self._paused && self.type !== 'Directory') {
+        self.once('resume', go)
+        return
+      }
+
+      var ev = events[e++]
+      if (!ev) {
+        return self._read()
+      }
+      self.emit(ev, props)
+      go()
+    })()
+  }
+}
+
+Reader.prototype.pipe = function (dest) {
+  var self = this
+  if (typeof dest.add === 'function') {
+    // piping to a multi-compatible, and we've got directory entries.
+    self.on('entry', function (entry) {
+      var ret = dest.add(entry)
+      if (ret === false) {
+        self.pause()
+      }
+    })
+  }
+
+  // console.error("R Pipe apply Stream Pipe")
+  return Stream.prototype.pipe.apply(this, arguments)
+}
+
+Reader.prototype.pause = function (who) {
+  this._paused = true
+  who = who || this
+  this.emit('pause', who)
+  if (this._stream) this._stream.pause(who)
+}
+
+Reader.prototype.resume = function (who) {
+  this._paused = false
+  who = who || this
+  this.emit('resume', who)
+  if (this._stream) this._stream.resume(who)
+  this._read()
+}
+
+Reader.prototype._read = function () {
+  this.error('Cannot read unknown type: ' + this.type)
+}
+
 
 /***/ }),
 
@@ -23581,262 +23848,7 @@ module.exports = Base => class extends Base {
 /***/ 806:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-module.exports = Reader
-
-var fs = __webpack_require__(598)
-var Stream = __webpack_require__(413).Stream
-var inherits = __webpack_require__(689)
-var path = __webpack_require__(622)
-var getType = __webpack_require__(716)
-var hardLinks = Reader.hardLinks = {}
-var Abstract = __webpack_require__(394)
-
-// Must do this *before* loading the child classes
-inherits(Reader, Abstract)
-
-var LinkReader = __webpack_require__(594)
-
-function Reader (props, currentStat) {
-  var self = this
-  if (!(self instanceof Reader)) return new Reader(props, currentStat)
-
-  if (typeof props === 'string') {
-    props = { path: props }
-  }
-
-  // polymorphism.
-  // call fstream.Reader(dir) to get a DirReader object, etc.
-  // Note that, unlike in the Writer case, ProxyReader is going
-  // to be the *normal* state of affairs, since we rarely know
-  // the type of a file prior to reading it.
-
-  var type
-  var ClassType
-
-  if (props.type && typeof props.type === 'function') {
-    type = props.type
-    ClassType = type
-  } else {
-    type = getType(props)
-    ClassType = Reader
-  }
-
-  if (currentStat && !type) {
-    type = getType(currentStat)
-    props[type] = true
-    props.type = type
-  }
-
-  switch (type) {
-    case 'Directory':
-      ClassType = __webpack_require__(984)
-      break
-
-    case 'Link':
-    // XXX hard links are just files.
-    // However, it would be good to keep track of files' dev+inode
-    // and nlink values, and create a HardLinkReader that emits
-    // a linkpath value of the original copy, so that the tar
-    // writer can preserve them.
-    // ClassType = HardLinkReader
-    // break
-
-    case 'File':
-      ClassType = __webpack_require__(58)
-      break
-
-    case 'SymbolicLink':
-      ClassType = LinkReader
-      break
-
-    case 'Socket':
-      ClassType = __webpack_require__(936)
-      break
-
-    case null:
-      ClassType = __webpack_require__(73)
-      break
-  }
-
-  if (!(self instanceof ClassType)) {
-    return new ClassType(props)
-  }
-
-  Abstract.call(self)
-
-  if (!props.path) {
-    self.error('Must provide a path', null, true)
-  }
-
-  self.readable = true
-  self.writable = false
-
-  self.type = type
-  self.props = props
-  self.depth = props.depth = props.depth || 0
-  self.parent = props.parent || null
-  self.root = props.root || (props.parent && props.parent.root) || self
-
-  self._path = self.path = path.resolve(props.path)
-  if (process.platform === 'win32') {
-    self.path = self._path = self.path.replace(/\?/g, '_')
-    if (self._path.length >= 260) {
-      // how DOES one create files on the moon?
-      // if the path has spaces in it, then UNC will fail.
-      self._swallowErrors = true
-      // if (self._path.indexOf(" ") === -1) {
-      self._path = '\\\\?\\' + self.path.replace(/\//g, '\\')
-    // }
-    }
-  }
-  self.basename = props.basename = path.basename(self.path)
-  self.dirname = props.dirname = path.dirname(self.path)
-
-  // these have served their purpose, and are now just noisy clutter
-  props.parent = props.root = null
-
-  // console.error("\n\n\n%s setting size to", props.path, props.size)
-  self.size = props.size
-  self.filter = typeof props.filter === 'function' ? props.filter : null
-  if (props.sort === 'alpha') props.sort = alphasort
-
-  // start the ball rolling.
-  // this will stat the thing, and then call self._read()
-  // to start reading whatever it is.
-  // console.error("calling stat", props.path, currentStat)
-  self._stat(currentStat)
-}
-
-function alphasort (a, b) {
-  return a === b ? 0
-    : a.toLowerCase() > b.toLowerCase() ? 1
-      : a.toLowerCase() < b.toLowerCase() ? -1
-        : a > b ? 1
-          : -1
-}
-
-Reader.prototype._stat = function (currentStat) {
-  var self = this
-  var props = self.props
-  var stat = props.follow ? 'stat' : 'lstat'
-  // console.error("Reader._stat", self._path, currentStat)
-  if (currentStat) process.nextTick(statCb.bind(null, null, currentStat))
-  else fs[stat](self._path, statCb)
-
-  function statCb (er, props_) {
-    // console.error("Reader._stat, statCb", self._path, props_, props_.nlink)
-    if (er) return self.error(er)
-
-    Object.keys(props_).forEach(function (k) {
-      props[k] = props_[k]
-    })
-
-    // if it's not the expected size, then abort here.
-    if (undefined !== self.size && props.size !== self.size) {
-      return self.error('incorrect size')
-    }
-    self.size = props.size
-
-    var type = getType(props)
-    var handleHardlinks = props.hardlinks !== false
-
-    // special little thing for handling hardlinks.
-    if (handleHardlinks && type !== 'Directory' && props.nlink && props.nlink > 1) {
-      var k = props.dev + ':' + props.ino
-      // console.error("Reader has nlink", self._path, k)
-      if (hardLinks[k] === self._path || !hardLinks[k]) {
-        hardLinks[k] = self._path
-      } else {
-        // switch into hardlink mode.
-        type = self.type = self.props.type = 'Link'
-        self.Link = self.props.Link = true
-        self.linkpath = self.props.linkpath = hardLinks[k]
-        // console.error("Hardlink detected, switching mode", self._path, self.linkpath)
-        // Setting __proto__ would arguably be the "correct"
-        // approach here, but that just seems too wrong.
-        self._stat = self._read = LinkReader.prototype._read
-      }
-    }
-
-    if (self.type && self.type !== type) {
-      self.error('Unexpected type: ' + type)
-    }
-
-    // if the filter doesn't pass, then just skip over this one.
-    // still have to emit end so that dir-walking can move on.
-    if (self.filter) {
-      var who = self._proxy || self
-      // special handling for ProxyReaders
-      if (!self.filter.call(who, who, props)) {
-        if (!self._disowned) {
-          self.abort()
-          self.emit('end')
-          self.emit('close')
-        }
-        return
-      }
-    }
-
-    // last chance to abort or disown before the flow starts!
-    var events = ['_stat', 'stat', 'ready']
-    var e = 0
-    ;(function go () {
-      if (self._aborted) {
-        self.emit('end')
-        self.emit('close')
-        return
-      }
-
-      if (self._paused && self.type !== 'Directory') {
-        self.once('resume', go)
-        return
-      }
-
-      var ev = events[e++]
-      if (!ev) {
-        return self._read()
-      }
-      self.emit(ev, props)
-      go()
-    })()
-  }
-}
-
-Reader.prototype.pipe = function (dest) {
-  var self = this
-  if (typeof dest.add === 'function') {
-    // piping to a multi-compatible, and we've got directory entries.
-    self.on('entry', function (entry) {
-      var ret = dest.add(entry)
-      if (ret === false) {
-        self.pause()
-      }
-    })
-  }
-
-  // console.error("R Pipe apply Stream Pipe")
-  return Stream.prototype.pipe.apply(this, arguments)
-}
-
-Reader.prototype.pause = function (who) {
-  this._paused = true
-  who = who || this
-  this.emit('pause', who)
-  if (this._stream) this._stream.pause(who)
-}
-
-Reader.prototype.resume = function (who) {
-  this._paused = false
-  who = who || this
-  this.emit('resume', who)
-  if (this._stream) this._stream.resume(who)
-  this._read()
-}
-
-Reader.prototype._read = function () {
-  this.error('Cannot read unknown type: ' + this.type)
-}
-
+module.exports = require(__webpack_require__.ab + "build/Release/node_xz.node")
 
 /***/ }),
 
@@ -24950,6 +24962,7 @@ function Extract (opts) {
 
 Object.defineProperty(exports, "__esModule", { value: true });
 const versions = {
+    '11.2-2022.02': 'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-${ARCH_OS_2}-arm-none-eabi.${EXT2}',
     '10-2020-q4': 'https://developer.arm.com/-/media/Files/downloads/gnu-rm/10-2020q4/gcc-arm-none-eabi-10-2020-q4-major-${ARCH_OS}.${EXT}',
     '9-2020-q2': 'https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2020q2/gcc-arm-none-eabi-9-2020-q2-update-${ARCH_OS}.${EXT}',
     '9-2019-q4': 'https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2019q4/gcc-arm-none-eabi-9-2019-q4-major-${ARCH_OS}.${EXT}',
@@ -24986,30 +24999,38 @@ exports.availableVersions = availableVersions;
 function distributionUrl(version, platform) {
     let osName;
     let archOs;
+    let archOs2;
     let ext;
+    let ext2;
     let winExtraExt = '';
     switch (platform) {
         case 'darwin':
             osName = 'mac';
             archOs = 'mac';
+            archOs2 = 'darwin-x86_64';
             ext = 'tar.bz2';
+            ext2 = 'tar.xz';
             break;
         case 'linux':
             osName = 'linux';
             archOs = 'x86_64-linux';
+            archOs2 = 'x86_64';
             ext = 'tar.bz2';
+            ext2 = 'tar.xz';
             break;
         case 'win32':
             osName = 'win32';
             archOs = 'win32';
+            archOs2 = 'mingw-w64-i686';
             ext = 'zip';
+            ext2 = 'zip';
             winExtraExt = '-zip';
             break;
         default:
             throw new Error(`platform ${platform} is not supported`);
     }
     const parts = version.split('-');
-    if (parts.length !== 3) {
+    if (parts.length !== 2 && parts.length !== 3) {
         throw new Error(`invalid version ${version}. Available: ${availableVersions()}`);
     }
     const url = versions[version];
@@ -25022,8 +25043,12 @@ function distributionUrl(version, platform) {
                 return osName;
             case 'ARCH_OS':
                 return archOs;
+            case 'ARCH_OS_2':
+                return archOs2;
             case 'EXT':
                 return ext;
+            case 'EXT2':
+                return ext2;
             case 'WIN_EXTRA_EXT':
                 return winExtraExt;
         }
@@ -26571,7 +26596,7 @@ if (util && util.inspect && util.inspect.custom) {
 module.exports = SocketReader
 
 var inherits = __webpack_require__(689)
-var Reader = __webpack_require__(806)
+var Reader = __webpack_require__(617)
 
 inherits(SocketReader, Reader)
 
@@ -29571,7 +29596,7 @@ module.exports = DirReader
 var fs = __webpack_require__(598)
 var inherits = __webpack_require__(689)
 var path = __webpack_require__(622)
-var Reader = __webpack_require__(806)
+var Reader = __webpack_require__(617)
 var assert = __webpack_require__(357).ok
 
 inherits(DirReader, Reader)
@@ -29815,6 +29840,108 @@ DirReader.prototype.emitEntry = function (entry) {
   this.emit('child', entry)
 }
 
+
+/***/ }),
+
+/***/ 998:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+const stream = __webpack_require__(413);
+const node_xz = __webpack_require__(806);
+const DEFAULT_PRESET = 6;
+const MIN_BUFSIZE = 1024;
+const MAX_BUFSIZE = 64 * 1024;
+exports.ENCODE_FINISH = node_xz.ENCODE_FINISH;
+exports.MODE_ENCODE = node_xz.MODE_ENCODE;
+exports.MODE_DECODE = node_xz.MODE_DECODE;
+class XzStream extends stream.Transform {
+    constructor(mode, options) {
+        super(options);
+        this.engine = new node_xz.Engine(mode, options ? options.preset : DEFAULT_PRESET);
+        this.buffer = Buffer.alloc(options && options.bufferSize ? options.bufferSize : MIN_BUFSIZE);
+    }
+    _transform(chunk, encoding, callback) {
+        const input = chunk instanceof Buffer ? chunk : Buffer.from(chunk, encoding);
+        this.update(input, callback);
+    }
+    _flush(callback) {
+        this.final(callback);
+    }
+    // mimic the crypto API for people who don't care for nodejs streams
+    update(input, callback) {
+        const bufSize = Math.max(Math.min(input.length * 1.1, MAX_BUFSIZE), MIN_BUFSIZE);
+        if (bufSize > this.buffer.length)
+            this.buffer = Buffer.alloc(bufSize);
+        this.processLoop(input, 0, [], callback);
+    }
+    // mimic the crypto API for people who don't care for nodejs streams
+    updatePromise(input) {
+        return new Promise((resolve, reject) => {
+            this.update(input, (error, output) => {
+                if (error || !output)
+                    return reject(error);
+                resolve(output);
+            });
+        });
+    }
+    // mimic the crypto API for people who don't care for nodejs streams
+    final(callback) {
+        this.processLoop(undefined, exports.ENCODE_FINISH, [], callback);
+    }
+    // mimic the crypto API for people who don't care for nodejs streams
+    finalPromise() {
+        return new Promise((resolve, reject) => {
+            this.final((error, output) => {
+                if (error || !output)
+                    return reject(error);
+                resolve(output);
+            });
+        });
+    }
+    processLoop(input, flags, segments, callback) {
+        // slightly too clever: we use the same buffer each time, as long as it's
+        // big enough: the `concat` at the end will create a new one. if we need
+        // to go back for a 2nd+ time, we replace it, since the array of `slice`
+        // are just views.
+        this.engine.process(input, this.buffer, flags, (error, used) => {
+            if (error || used === undefined)
+                return callback(error || new Error("Unknown error"));
+            let size = Math.abs(used);
+            segments.push(this.buffer.slice(0, size));
+            if (used < 0) {
+                this.buffer = Buffer.alloc(this.buffer.length);
+                this.processLoop(undefined, flags, segments, callback);
+            }
+            else {
+                callback(undefined, Buffer.concat(segments));
+            }
+        });
+    }
+}
+class Compressor extends XzStream {
+    constructor(options) {
+        super(exports.MODE_ENCODE, options);
+    }
+}
+exports.Compressor = Compressor;
+class Decompressor extends XzStream {
+    constructor(options) {
+        super(exports.MODE_DECODE, options);
+    }
+}
+exports.Decompressor = Decompressor;
+function compressRaw(preset = DEFAULT_PRESET) {
+    return new node_xz.Engine(exports.MODE_ENCODE, preset);
+}
+exports.compressRaw = compressRaw;
+function decompressRaw() {
+    return new node_xz.Engine(exports.MODE_DECODE, 0);
+}
+exports.decompressRaw = decompressRaw;
+//# sourceMappingURL=xz.js.map
 
 /***/ })
 

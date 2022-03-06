@@ -1,4 +1,6 @@
 const versions: {[key: string]: string} = {
+  '11.2-2022.02':
+    'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-${ARCH_OS_2}-arm-none-eabi.${EXT2}',
   '10-2020-q4':
     'https://developer.arm.com/-/media/Files/downloads/gnu-rm/10-2020q4/gcc-arm-none-eabi-10-2020-q4-major-${ARCH_OS}.${EXT}',
   '9-2020-q2':
@@ -63,30 +65,38 @@ export function availableVersions(): string[] {
 export function distributionUrl(version: string, platform: string): string {
   let osName: string
   let archOs: string
+  let archOs2: string
   let ext: string
+  let ext2: string
   let winExtraExt = ''
   switch (platform) {
     case 'darwin':
       osName = 'mac'
       archOs = 'mac'
+      archOs2 = 'darwin-x86_64'
       ext = 'tar.bz2'
+      ext2 = 'tar.xz'
       break
     case 'linux':
       osName = 'linux'
       archOs = 'x86_64-linux'
+      archOs2 = 'x86_64'
       ext = 'tar.bz2'
+      ext2 = 'tar.xz'
       break
     case 'win32':
       osName = 'win32'
       archOs = 'win32'
+      archOs2 = 'mingw-w64-i686'
       ext = 'zip'
+      ext2 = 'zip'
       winExtraExt = '-zip'
       break
     default:
       throw new Error(`platform ${platform} is not supported`)
   }
   const parts = version.split('-')
-  if (parts.length !== 3) {
+  if (parts.length !== 2 && parts.length !== 3) {
     throw new Error(`invalid version ${version}. Available: ${availableVersions()}`)
   }
   const url = versions[version]
@@ -99,8 +109,12 @@ export function distributionUrl(version: string, platform: string): string {
         return osName
       case 'ARCH_OS':
         return archOs
+      case 'ARCH_OS_2':
+        return archOs2
       case 'EXT':
         return ext
+      case 'EXT2':
+        return ext2
       case 'WIN_EXTRA_EXT':
         return winExtraExt
     }

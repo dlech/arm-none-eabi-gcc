@@ -4,6 +4,7 @@ import * as url from 'url'
 import fetch from 'node-fetch'
 import tar from 'tar'
 import bz2 from 'unbzip2-stream'
+import * as xz from 'xz'
 import * as unzipper from 'unzipper'
 
 import * as gcc from '../src/gcc'
@@ -13,7 +14,7 @@ function urlExt(s: string): string {
   const components = u.path?.split('/')
   if (components && components?.length > 0) {
     const last = components[components?.length - 1]
-    const dot = last.indexOf('.')
+    const dot = last.indexOf('.', last.length - 8)
     if (dot >= 0) {
       return last.substr(dot).toLowerCase()
     }
@@ -40,6 +41,10 @@ export async function install(release: string, directory: string, platform?: str
     case '.tar.bz2':
       extractor = tar.x({strip: 1, C: directory})
       resp.body.pipe(bz2()).pipe(extractor)
+      break
+    case '.tar.xz':
+      extractor = tar.x({strip: 1, C: directory})
+      resp.body.pipe(new xz.Decompressor()).pipe(extractor)
       break
     default:
       throw new Error(`can't decompress ${urlExt(distUrl)}`)

@@ -3,7 +3,7 @@ description: 'Set up arm-none-eabi-gcc and add it to the PATH'
 author: 'Alberto Garcia Hierro <alberto@garciahierro.com>'
 inputs:
   release:
-    description: 'GNU Embedded Toolchain for Arm release name, in the V-YYYY-qZ format (e.g. "9-2019-q4")'
+    description: 'GNU Embedded Toolchain for Arm release name, in the V.V-YYYY.MM or V-YYYY-qZ format (e.g. "9-2019-q4")'
   directory:
     description: 'Directory to unpack GCC to. Defaults to a temporary directory.'
 runs:
