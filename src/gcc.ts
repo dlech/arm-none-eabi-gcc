@@ -1,4 +1,6 @@
 const versions: {[key: string]: string} = {
+  '11.3.rel1':
+    'https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/arm-gnu-toolchain-11.3.rel1-${ARCH_OS_2}-arm-none-eabi.${EXT2}',
   '11.2-2022.02':
     'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-${ARCH_OS_2}-arm-none-eabi.${EXT2}',
   '10-2020-q4':
@@ -95,8 +97,7 @@ export function distributionUrl(version: string, platform: string): string {
     default:
       throw new Error(`platform ${platform} is not supported`)
   }
-  const parts = version.split('-')
-  if (parts.length !== 2 && parts.length !== 3) {
+  if (!availableVersions().includes(version)) {
     throw new Error(`invalid version ${version}. Available: ${availableVersions()}`)
   }
   const url = versions[version]

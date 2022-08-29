@@ -27,14 +27,14 @@ test('test url', () => {
   expect(gcc.distributionUrl('10-2020-q4', 'linux')).toStrictEqual(
     'https://developer.arm.com/-/media/Files/downloads/gnu-rm/10-2020q4/gcc-arm-none-eabi-10-2020-q4-major-x86_64-linux.tar.bz2'
   )
-  expect(gcc.distributionUrl('11.2-2022.02', 'darwin')).toStrictEqual(
-    'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-darwin-x86_64-arm-none-eabi.tar.xz'
+  expect(gcc.distributionUrl('11.3.rel1', 'darwin')).toStrictEqual(
+    'https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/gcc-arm-11.3.rel1-darwin-x86_64-arm-none-eabi.tar.xz'
   )
-  expect(gcc.distributionUrl('11.2-2022.02', 'linux')).toStrictEqual(
-    'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-x86_64-arm-none-eabi.tar.xz'
+  expect(gcc.distributionUrl('11.3.rel1', 'linux')).toStrictEqual(
+    'https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/gcc-arm-11.3.rel1-x86_64-arm-none-eabi.tar.xz'
   )
-  expect(gcc.distributionUrl('11.2-2022.02', 'win32')).toStrictEqual(
-    'https://developer.arm.com/-/media/Files/downloads/gnu/11.2-2022.02/binrel/gcc-arm-11.2-2022.02-mingw-w64-i686-arm-none-eabi.zip'
+  expect(gcc.distributionUrl('11.3.rel1', 'win32')).toStrictEqual(
+    'https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/gcc-arm-11.3.rel1-mingw-w64-i686-arm-none-eabi.zip'
   )
 })
 
@@ -68,9 +68,9 @@ async function tmpInstall(release: string, platform?: string): Promise<void> {
 test(
   'install',
   async () => {
-    await tmpInstall('11.2-2022.02', 'linux')
-    await tmpInstall('11.2-2022.02', 'darwin')
-    await tmpInstall('11.2-2022.02', 'win32')
+    await tmpInstall('11.3.rel1', 'linux')
+    await tmpInstall('11.3.rel1', 'darwin')
+    await tmpInstall('11.3.rel1', 'win32')
     await tmpInstall('10-2020-q4', 'linux')
     await tmpInstall('9-2019-q4', 'darwin')
     await tmpInstall('6-2017-q1', 'win32')
